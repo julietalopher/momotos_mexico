@@ -1,0 +1,463 @@
+---
+title: "Momotos en Mexico"
+format: 
+  html:
+    theme: cosmo
+    page-layout: custom
+server: shiny
+author: "Julieta Lopez y Manfred Salas"
+---
+
+```{r}
+#| label: inicio
+#| context: setup
+#| message: false
+#| warning: false
+
+# Bloque para operaciones iniciales
+library(tidyverse) #Carga de tidyverse (incluye ggplot3 y readr)
+library(plotly) # Carga de plotly
+library(DT) # Carga de DT
+library(dplyr) # Carga de dplyr
+library(sf) #Carga de sf
+library(leaflet) #Carga de leaflet para mapas interactivos
+library(data.table)
+library(shiny)
+library(rsconnect)
+library(RColorBrewer) #para dar formatos de color a la grafica
+
+```
+
+```{r}
+#| panel: fill
+
+imageOutput("mm")
+
+```
+
+```{r}
+#| context: server
+
+output$mm <- renderImage({
+    # A temp file to save the output.
+    # This file will be removed later by renderImage
+  list(src = 'img/momotos.png')
+    
+})
+
+```
+
+## Introducción
+
+El siguiente documento presenta un breve análisis de los registros de aves del género *Momotus* en México. Los datos utilizados, fueron obtenidos de la Instalación de Información sobre la Biodiversidad Mundial (GBIF por sus siglas en inglés) disponibles en su página oficial (<https://www.gbif.org/occurrence/search>). Los datos de los estados de México, se obtuvieron de la página del Instituto Nacional de Geografía y Estadísitica (<https://www.inegi.org.mx/>).
+
+El análisis se realizó en *R* para su visualización en *ShinyApps*.
+
+```{r}
+#| label: lectura-datos
+#| context: data
+# Bloque para lectura de datos y compartirlos
+# en todos los bloques de código
+# Archivo DwC con registros de presencia
+archivo_dwc <- "datos/momotos2.csv"
+# Lectura del archivo DwC
+registros <-
+  st_read(
+    archivo_dwc,               
+    options = c(
+      "X_POSSIBLE_NAMES=decimalLongitude", # columna de longitud decimal
+      "Y_POSSIBLE_NAMES=decimalLatitude"   # columna de latitud decimal
+    ),
+    quiet = TRUE
+  )
+
+estados <-
+  st_read(
+    "datos/estados.shp",
+    options = "ENCODING=UTF8",
+    quiet = TRUE # para evitar el despliegue de mensajes
+  )
+
+  estados_mex <- estados$NOM_ENT
+
+  registros <-
+    registros |>
+      mutate(eventDate = as.Date(eventDate, format = "%d/%m/%Y")) |>
+      filter(stateProvince %in% estados_mex) |>
+      drop_na()
+
+```
+
+```{r}
+#| panel: sidebar
+# Barra lateral
+# Lista de especies
+lista_especies <- unique(registros$species)
+lista_especies <- sort(lista_especies)
+lista_especies <- c("Todas", lista_especies)
+# Selector de especies
+selectInput(
+  inputId = "especie",
+  label = "Especie",
+  choices = lista_especies,
+  selected = "Todas"
+)
+
+#Lita años
+lista_anios <- unique(registros$year) #obtener valores 
+lista_anios <- sort(lista_anios) #ordenar
+lista_anios <- c("Todos", lista_anios) #agregar opción todas
+
+# Selector de especies
+selectInput(
+  inputId = "anio",
+  label = "Año",
+  choices = lista_anios,
+  selected = "Todos"
+)
+
+#Lista Estados
+lista_estado <- unique(estados$NOM_ENT) #obtener valores 
+lista_estado <- sort(lista_estado) #ordenar
+lista_estado <- c("Todos", lista_estado) #agregar opción todas
+
+# Selector de estados
+selectInput(
+  inputId = "estado",
+  label = "Estado",
+  choices = lista_estado,
+  selected = "Todos"
+)
+
+```
+
+```{r}
+#| panel: fill
+# Cuerpo principal de la interfaz de usuario
+dataTableOutput("tabla")
+```
+
+```{r}
+#| label: servidor
+#| context: server
+# Operaciones en el servidor
+# Función reactiva para filtrar los registros con base en los controles de entrada
+filtrarRegistros <- reactive({
+  # Valor inicial del objeto que va a retornarse
+  registros_filtrados <- registros
+  
+  if (input$especie != "Todas") {
+    registros_filtrados <-
+      registros_filtrados |>
+      filter(species == input$especie)
+  }
+  
+  if (input$anio != "Todos") {
+    registros_filtrados <-
+      registros_filtrados |>
+      filter(year == input$anio)
+  }
+  
+  if (input$estado != "Todos") {
+    registros_filtrados <-
+      registros_filtrados |>
+      filter(stateProvince == input$estado)
+  }
+  
+  
+  return(registros_filtrados)
+})  
+  
+# Tabla con registros de presencia
+output$tabla <- renderDataTable({
+  registros <- filtrarRegistros()
+  
+  registros |>
+    st_drop_geometry() |>
+    select(species, stateProvince, locality, eventDate) |>
+    datatable(
+      colnames = c("Especie", "Provincia", "Localidad", "Fecha"),
+      options = list(
+        pageLength = 5,
+        language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+      )
+    )
+})
+```
+
+## Grafico
+
+```{r}
+#| panel: sidebar
+#| warning: false
+# Barra lateral
+# Lista de especies
+lista_especies_plot <- unique(registros$species) #obtener valores 
+llista_especies_plot <- sort(lista_especies_plot) #ordenar
+lista_especies_plot <- c("Todas", lista_especies_plot) #agregar opción todas
+
+# Selector de especies
+selectInput(
+  inputId = "especie_plot",
+  label = "Especie",
+  choices = lista_especies_plot,
+  selected = "Todas"
+)
+
+#Lita años
+lista_anios_plot <- unique(registros$year) #obtener valores 
+lista_anios_plot <- sort(lista_anios_plot) #ordenar
+lista_anios_plot <- c("Todos", lista_anios_plot) #agregar opción todas
+
+# Selector de especies
+selectInput(
+  inputId = "anio_plot",
+  label = "Año",
+  choices = lista_anios_plot,
+  selected = "Todos"
+)
+
+#Lista Estados
+lista_estado_plot <- unique(estados$NOM_ENT) #obtener valores 
+lista_estado_plot <- sort(lista_estado_plot) #ordenar
+lista_estado_plot <- c("Todos", lista_estado_plot) #agregar opción todas
+
+# Selector de estados
+selectInput(
+  inputId = "estado_plot",
+  label = "Estado",
+  choices = lista_estado_plot,
+  selected = "Todos"
+)
+
+```
+
+```{r}
+#| panel: fill
+
+# Cuerpo principal de la interfaz de usuario
+
+plotlyOutput("plot")
+
+```
+
+```{r}
+#| label: servidor-plot
+#| context: server
+#| warning: false
+
+filtrarRegistros_plot <- reactive({
+  # Valor inicial del objeto que va a retornarse
+  registros_filtrados_plot <- registros
+  
+  if (input$especie_plot != "Todas") {
+    registros_filtrados_plot <-
+      registros_filtrados_plot |>
+      filter(species == input$especie_plot)
+  }
+  
+    if (input$anio_plot != "Todos") {
+    registros_filtrados_plot <-
+      registros_filtrados_plot |>
+      filter(year == input$anio_plot)
+  }
+  
+  if (input$estado_plot != "Todos") {
+    registros_filtrados_plot <-
+      registros_filtrados_plot |>
+      filter(stateProvince == input$estado_plot)
+  }
+  
+  return(registros_filtrados_plot)
+})  
+
+
+output$plot <- renderPlotly({
+  
+  registros <- filtrarRegistros_plot()
+  
+  registros <-
+    registros |>
+      filter(month %in% seq(1,12,1)) 
+  
+  meses = c("1" = "Ene", "2" = "Feb", "3" = "Mar", "4" = "Abr", 
+             "5" = "May", "6" = "Jun", "7" = "Jul", "8" = "Ago", 
+             "9" =  "Sep", "10" =  "Oct", "11" =  "Nov", "12" =  "Dic")
+  
+  especies_plot <-
+  registros |>
+    ggplot(aes(x = as.numeric(month), fill = species)) +
+    geom_bar() +
+      labs(x = "Meses",
+           y = "Número de individuos",
+           title = "Especies de Momotus registrados en México",
+           subtitle = "Registro por mes de 1900 al 2022",
+           fill = "Especie") +
+    scale_x_continuous(breaks = seq(1,12,1), labels = meses)+
+    theme(panel.background = element_rect(fill = 'transparent'),
+          panel.grid = element_line(color="gray80"),
+          panel.border = element_rect(color = "gray", fill='transparent', size = 2)) +
+    scale_fill_manual(values=brewer.pal(n = 6, name = "YlGn"))
+  
+  # Generación de gráfico con plotly
+  
+   ggplotly(especies_plot) |> 
+     config(locale = 'es') |>
+    layout(title = list(text = paste0('<b>','Especies de Momotus registrados en México' ,'</b> <br>', # <br> para nueva linea en formato HTML y <b> para dar formato en negritass
+                                      '<sup>', # Estilo de nueva linea, más pequeña que el titulo original. <sup> es una función de HTML que otorga este estilo
+                                      "Registro por mes de 1900 al 2022",
+                                      '</sup>')))
+  
+})
+
+```
+
+## Mapa de Registros
+
+```{r}
+#| panel: sidebar
+# Barra lateral
+# Lista de especies
+lista_especies_map <- unique(registros$species) #obtener valores 
+llista_especies_map <- sort(lista_especies_map) #ordenar
+lista_especies_map <- c("Todas", lista_especies_map) #agregar opción todas
+
+# Selector de especies
+selectInput(
+  inputId = "especie_map",
+  label = "Especie",
+  choices = lista_especies_map,
+  selected = "Todas"
+)
+
+#Lita años
+lista_anios_map <- unique(registros$year) #obtener valores 
+lista_anios_map <- sort(lista_anios_map) #ordenar
+lista_anios_map <- c("Todos", lista_anios_map) #agregar opción todas
+
+# Selector de especies
+selectInput(
+  inputId = "anio_map",
+  label = "Año",
+  choices = lista_anios_map,
+  selected = "Todos"
+)
+
+#Lista Estados
+lista_estado_map <- unique(estados$NOM_ENT) #obtener valores 
+lista_estado_map <- sort(lista_estado_map) #ordenar
+lista_estado_map <- c("Todos", lista_estado_map) #agregar opción todas
+
+# Selector de estados
+selectInput(
+  inputId = "estado_map",
+  label = "Estado",
+  choices = lista_estado_map,
+  selected = "Todos"
+)
+
+```
+
+```{r}
+#| panel: fill
+
+# Cuerpo principal de la interfaz de usuario
+
+leafletOutput("mymap")
+
+```
+
+```{r}
+#| label: servidor-mapa
+#| context: server
+#| warning: false
+
+filtrarRegistros_map <- reactive({
+  # Valor inicial del objeto que va a retornarse
+  registros_filtrados_map <- registros
+  
+  if (input$especie_map != "Todas") {
+    registros_filtrados_map <-
+      registros_filtrados_map |>
+      filter(species == input$especie_map)
+  }
+  
+    if (input$anio_map != "Todos") {
+    registros_filtrados_map <-
+      registros_filtrados_map |>
+      filter(year == input$anio_map)
+  }
+  
+  if (input$estado_map != "Todos") {
+    registros_filtrados_map <-
+      registros_filtrados_map |>
+      filter(stateProvince == input$estado_map)
+  }
+  
+  return(registros_filtrados_map)
+})  
+
+output$mymap <- renderLeaflet({
+  
+  registros <- filtrarRegistros_map()
+  
+  #Transformación de dataframe a shapefile
+
+  registros_v <-
+    st_as_sf(registros, coords = c("decimalLongitude", "decimalLatitude"))
+
+  class(registros_v) #para corroborar el cambio de tipo de datos
+
+#Definición de SCR
+
+  st_crs(registros_v) <- 4326
+
+# Transformación del CRS del objeto provincias a WGS84 (EPSG = 4326)
+
+  estados <-
+    estados |>
+    st_transform(4326)
+  
+leaflet() |>
+  setView(# centro y nivel inicial de acercamiento
+    lng = -101,
+    lat = 22,
+    zoom = 4) |>
+  addTiles(group = "OpenStreetMap") |>
+  addProviderTiles(providers$Esri.NatGeoWorldMap) |>
+  addPolygons(
+    # capa de provincias (polígonos)
+    data = estados,
+    color = "black",
+    fillColor = "transparent",
+    stroke = TRUE,
+    weight = 1.3,
+    group = "Estado",
+    popup = paste(
+      paste0("<strong>Estado: </strong>", estados$NOM_ENT),
+      sep = '<br/>')
+    ) |>
+  addCircleMarkers(
+    # capa de registros de presencia (puntos)
+    data = registros_v,
+    stroke = F,
+    radius = 5,
+    fillColor = 'darkblue',
+    fillOpacity = 1,
+    group = "Momotus",
+    popup = paste(
+      paste0("<strong>Especie: </strong>", registros$species ), 
+      paste0("<br><strong>Provincia: </strong>", registros$stateProvince ), 
+      paste0("<br><strong>Localidad: </strong>", registros$locality), 
+      paste0("<br><strong>Fecha: </strong>", registros$eventDate )
+    )#<br> asigna una nueva línea para  una mejor visualización en el popup.
+  ) |>
+  addLayersControl(
+    baseGroups = c("OpenStreetMap", "Esri.NatGeoWorldMap"),
+    overlayGroups = c("Momotus", "Estado")) |> # control de capas
+  addScaleBar(position = "bottomright", options = scaleBarOptions(imperial = FALSE)) |> # barra de escala
+  addMiniMap(position = "bottomleft")  # mapa de ubicación
+
+})
+
+```
